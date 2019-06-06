@@ -1,10 +1,21 @@
 #pragma once
 #include "neovm_types.h"
 
+#ifndef VM_STACK_SIZE
 #define VM_STACK_SIZE 8192
+#endif
+
+#ifndef VM_IDT_SIZE
 #define VM_IDT_SIZE 1024
+#endif
+
+#ifndef VM_ID_EXT_SIZE
 #define VM_ID_EXT_SIZE 1024
+#endif
+
+#ifndef VM_PROGRAM_SIZE
 #define VM_PROGRAM_SIZE 1024
+#endif
 
 /////////////////////////////////////////
 //              REGISTERS

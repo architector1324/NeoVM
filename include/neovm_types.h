@@ -8,17 +8,22 @@
 #define NULL (void*)0
 #endif
 
-#ifdef VM_TARGET_ARCH16
-typedef unsigned short int vm_size_t;
+#ifdef VM_TARGET_ARCH8
+typedef unsigned char vm_size_t;
 #else
-    #ifdef VM_TARGET_ARCH32
-    typedef unsigned int vm_size_t;
+    #ifdef VM_TARGET_ARCH16
+    typedef unsigned short int vm_size_t;
     #else
-        #ifdef VM_TARGET_ARCH64
-        typedef unsigned long long vm_size_t;
+        #ifdef VM_TARGET_ARCH32
+        typedef unsigned int vm_size_t;
+        #else
+            #ifdef VM_TARGET_ARCH64
+            typedef unsigned long long vm_size_t;
+            #endif
         #endif
     #endif
 #endif
+
 
 #ifndef __cat
 #define __cat(X, Y) X##Y
@@ -100,7 +105,7 @@ _vm_decl_i(256)
 #define VM_INT256_T(some256) VM_INT256_T_PTR(some256)[0]
 
 
-vm_bool vm_is_big_endian(){
+vm_bool vm_host_is_big_endian(){
     unsigned short magic = 0xffaa;
     return VM_INT8_T(magic) == 0xff;
 }
@@ -108,7 +113,7 @@ vm_bool vm_is_big_endian(){
 #define _vm_ui_to_size_t(bitdepth)\
 vm_size_t _cat(vm_ui, _cat(bitdepth, _to_size_t))(_vm_ui(bitdepth) a){\
     vm_size_t result;\
-    if(vm_is_big_endian()){\
+    if(vm_host_is_big_endian()){\
         vm_size_t size = sizeof(result);\
         for(vm_size_t i = 0; i < size; i++)\
             VM_UINT8_T_PTR(result)[size - i - 1] = i < _vm_ui_size(bitdepth) ? a.bytes[_vm_ui_size(bitdepth) - i - 1] : 0x00;\
@@ -193,7 +198,7 @@ _vm_ui(bitdepth) _cat(vm_dec_ui, bitdepth)(_vm_ui(bitdepth) a){\
     return result;\
 }
 
-#define _vm_add_ui_of(a, b, c) ((a) >= 0xff - (c)) || ((a) >= 0xff - (b)) || ((b) >= 0xff - (c)) ||((a) >= 0xff - (b) - (c) ? 1 : 0)
+#define _vm_add_ui_of(a, b, c) ((int)(a) >= 256 - (int)(c)) || ((int)(a) >= 256 - (int)(b)) || ((int)(b) >= 256 - (int)(c)) ||((int)(a) >= 256 - (int)(b) - (int)(c) ? 1 : 0)
 
 #define _vm_add_ui(bitdepth)\
 typedef struct _cat(vm_add_ui, _cat(bitdepth, _result)){\
