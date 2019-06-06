@@ -4,7 +4,6 @@
 #include "neovm.h"
 
 
-
 int main(){
     // VMInstance vm = VMInstanceDefault;
 
