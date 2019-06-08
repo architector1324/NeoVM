@@ -8,10 +8,14 @@
 - Hardware-independed
 - Easy to extend instruction set (add your own instructions)
 - Realtime and programmed instruction execution modes
+- Fake multithreading ([TDM](https://en.wikipedia.org/wiki/Time-division_multiplexing))
+- Networking
 
 
 **Features:**
 - Abstract **VM** without global state (using ***Instances*** instead)
+- Each Instance has ***execution threads***
+- Instances can communicate by ***network***
 - Segmented memory model (for ***code***, ***registers*** and ***stacks***)
 - Totally virtual 256-bit address space (different for each segment)
 - 253 general purpose compound registers
@@ -58,9 +62,12 @@ r8_0, r8_1    ; (r16_0)
 ...
 r8_14, r8_127 ; (r16_63)
 ```
-2. Instruction pointer:
+2. Instruction pointers (for threads):
 ```
-rip
+rip0
+rip1
+...
+rip{k - 1}  ; k is a number of threads
 ```
 3. Stacks ending pointers:
 ```
@@ -79,12 +86,12 @@ code_adr = num256
 ```
 2. Stacks segment:
 ```
-stack8_adr = rsp8 + 8 * num256
-stack16_adr = rsp16 + 16 * num256
-stack32_adr = rsp32 + 32 * num256
-stack64_adr = rsp64 + 64 * num256
-stack128_adr = rsp128 + 128 * num256
-stack256_adr = rsp256 + 256 * num256
+stack8_adr = rsp8 - 8 * (num256 + 1)
+stack16_adr = rsp16 - 16 * (num256 + 1)
+stack32_adr = rsp32 - 32 * (num256 + 1)
+stack64_adr = rsp64 - 64 * (num256 + 1)
+stack128_adr = rsp128 - 128 * (num256 + 1)
+stack256_adr = rsp256 - 256 * (num256 + 1)
 ```
 3. Registers segment:
 ```
@@ -96,9 +103,80 @@ reg128_adr = 240 + num8  ; 0 <= num8 < 8
 reg256_adr = 248 + num8  ; 0 <= num8 < 4
 ```
 
+Taking value by address (number):
+```
+[adr] = num
+```
+
 Taking address:
 ```
-instr num256               ; code_adr
-instr num8                 ; reg_adr
-instr rsp{k} + k * num256  ; stack{k}_adr
+instr code_adr num256      ; code address
+instr reg{k}_adr num8      ; same as `instr r{k}_{m + num8}`
+instr stack{k}_adr num256  ; stack{k} address
+```
+
+```
+instr code_adr r256      ; code address stored in r256
+instr reg{k}_adr r8      ; register address stored in r8
+instr stack{k}_adr r256  ; stack{k} address stored in r256
+```
+```
+instr code_adr [stack256_adr num256]      ; code address stored in stack256
+instr reg{k}_adr [stack8_adr num256]      ; register address stored in stack8
+instr stack{k}_adr [stack256_adr num256]  ; stack{k} address stored in stack256
+```
+
+*Note*: For short form we will use `code_adr`, `reg_adr` and `stack_adr` next.
+
+**Base instruction set**:
+
+1. Go:
+```
+go code_adr
+```
+
+2. Sending data:
+```
+snd from, to
+```
+```
+snd num, reg
+snd num, reg_adr
+snd num, stack_adr
+
+snd reg, reg
+snd reg, reg_adr
+snd reg, stack_adr
+
+snd stack_adr, reg
+snd stack_adr, reg_adr
+snd stack_adr, stack_adr
+
+snd reg_adr, reg
+snd reg_adr, reg_adr
+snd reg_adr, stack_adr
+
+snd [stack_adr], reg
+snd [stack_adr], reg_adr
+snd [stack_adr], stack_adr
+
+snd [reg_adr], reg
+snd [reg_adr], reg_adr
+snd [reg_adr], stack_adr
+```
+
+```
+snd num, {ip / port}  ; hang thread until response
+snd reg, {ip / port}
+
+snd stack_adr, {ip / port}
+snd reg_adr, {ip / port}
+
+snd [stack_adr], {ip / port}
+snd [reg_adr], {ip / port}
+```
+```
+snd {ip / port}, reg  ; hang thread until receive some message
+snd {ip / port}, reg_adr
+snd {ip / port}, stack_adr
 ```
