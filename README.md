@@ -64,19 +64,19 @@ r8_14, r8_127 ; (r16_63)
 ```
 2. Instruction pointers (for threads):
 ```
-rip0
-rip1
+pc0
+pc1
 ...
-rip{k - 1}  ; k is a number of threads
+pc{k - 1}  ; k is a number of threads
 ```
 3. Stacks ending pointers:
 ```
-rsp8
-rsp16
-rsp32
-rsp64
-rsp128
-rsp256
+se8
+se16
+se32
+se64
+se128
+se256
 ```
 
 **Address**:
@@ -86,12 +86,12 @@ code_adr = num256
 ```
 2. Stacks segment:
 ```
-stack8_adr = rsp8 - 8 * (num256 + 1)
-stack16_adr = rsp16 - 16 * (num256 + 1)
-stack32_adr = rsp32 - 32 * (num256 + 1)
-stack64_adr = rsp64 - 64 * (num256 + 1)
-stack128_adr = rsp128 - 128 * (num256 + 1)
-stack256_adr = rsp256 - 256 * (num256 + 1)
+stack8_adr = se8 - 8 * (num256 + 1)
+stack16_adr = se16 - 16 * (num256 + 1)
+stack32_adr = se32 - 32 * (num256 + 1)
+stack64_adr = se64 - 64 * (num256 + 1)
+stack128_adr = se128 - 128 * (num256 + 1)
+stack256_adr = se256 - 256 * (num256 + 1)
 ```
 3. Registers segment:
 ```

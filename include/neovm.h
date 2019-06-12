@@ -1,29 +1,12 @@
 #pragma once
-#include "neovm_types.h"
-#include <netinet/in.h>
+
+#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
-#ifndef VM_STACK_SIZE
-#define VM_STACK_SIZE 8192
-#endif
+#include "neovm_types.h"
 
-#ifndef VM_IDT_SIZE
-#define VM_IDT_SIZE 1024
-#endif
-
-#ifndef VM_ID_EXT_SIZE
-#define VM_ID_EXT_SIZE 1024
-#endif
-
-#ifndef VM_PROGRAM_SIZE
-#define VM_PROGRAM_SIZE 1024
-#endif
-
-#ifndef VM_MAX_INSTANCE_THREADS
-#define VM_MAX_INSTANCE_THREADS 1024
-#endif
 
 /////////////////////////////////////////
 //              REGISTERS
@@ -62,79 +45,119 @@ typedef struct vm_r256{
 /////////////////////////////////////////
 
 typedef struct VMThread{
-    vm_uint256_t rip;
-    vm_bool halt;
+    vm_uint256_t pc; // program counter
+    vm_bool lock, wait;
 
-    int server_sock;
-    int client_sock;
+    int ssck, csck; // client / server socket
+
+    vm_uint8_t nbuf8; // 8-bit net buffer
+    vm_uint16_t nbuf16;
+    vm_uint32_t nbuf32;
+    vm_uint64_t nbuf64;
+    vm_uint128_t nbuf128;
+    vm_uint256_t nbuf256;
 } VMThread;
 
 
 typedef struct VMInstance{
     // registers
     vm_r256 r0, r1, r2, r3;
-    vm_uint256_t rsp256, rsp128, rsp64, rsp32, rsp16, rsp8;
+    vm_uint256_t se256, se128, se64, se32, se16, se8;
     vm_bool halt;
 
-    VMThread thread[VM_MAX_INSTANCE_THREADS];
+    VMThread* thread;
     vm_size_t threads_count;
 
     // stacks
-    vm_uint256_t stack256[VM_STACK_SIZE / 32];
-    vm_uint128_t stack128[VM_STACK_SIZE / 16];
-    vm_uint64_t stack64[VM_STACK_SIZE / 8];
-    vm_uint32_t stack32[VM_STACK_SIZE / 4];
-    vm_uint16_t stack16[VM_STACK_SIZE / 2];
-    vm_uint8_t stack8[VM_STACK_SIZE];
+    vm_uint256_t* stack256;
+    vm_uint128_t* stack128;
+    vm_uint64_t* stack64;
+    vm_uint32_t* stack32;
+    vm_uint16_t* stack16;
+    vm_uint8_t* stack8;
+
+    vm_size_t stack_size;
 } VMInstance;
 
+VMThread _vmThread(){
+    VMThread result;
 
-VMInstance vmInstance(vm_size_t threads_count){
-    VMInstance result = {.threads_count = threads_count};
+    result.pc = (vm_uint256_t){
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00
+    };
+    result.lock = false;
+    result.wait = false;
 
-    for(vm_size_t i = 0; i < threads_count; i++){
-        result.thread[i].rip = (vm_uint256_t){
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-        };
 
-        int server_sock = socket(AF_INET, SOCK_STREAM, 0);
-        int client_sock = socket(AF_INET, SOCK_STREAM, 0);
+    result.csck = socket(AF_INET, SOCK_STREAM, 0);
+    result.ssck = socket(AF_INET, SOCK_STREAM, 0);
 
-        result.thread[i].server_sock = server_sock;
-        result.thread[i].client_sock = client_sock;
 
-        struct sockaddr_in server_adr = {
-            .sin_family = AF_INET,
-            .sin_port = htons(60000 + 2 * i),
-            .sin_addr.s_addr = htonl(INADDR_LOOPBACK)
-        };
-        struct sockaddr_in client_adr = {
-            .sin_family = AF_INET,
-            .sin_port = htons(60000 + 2 * i + 1),
-            .sin_addr.s_addr = htonl(INADDR_ANY)
-        };
 
-        int server_binded = bind(server_sock, (struct sockaddr*)&server_adr, sizeof(server_adr));
-        int client_binded = bind(client_sock, (struct sockaddr*)&client_adr, sizeof(client_adr));
+    return result;
+}
 
-        int listening = listen(server_sock, 1);
-    }
+void _vmReleaseThread(VMThread* thread){
+    thread->pc = (vm_uint256_t){
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00
+    };
+    thread->lock = false;
+    thread->wait = false;
+
+    close(thread->csck);
+    close(thread->ssck);
+
+    thread->csck = 0;
+    thread->ssck = 0;
+}
+
+VMInstance vmInstance(vm_size_t threads_count, vm_size_t stack_size){
+    VMInstance result = {.halt = false};
+
+    // setup stack
+    result.stack8 = malloc(stack_size);
+    result.stack16 = malloc(stack_size / 2);
+    result.stack32 = malloc(stack_size / 4);
+    result.stack64 = malloc(stack_size / 8);
+    result.stack128 = malloc(stack_size / 16);
+    result.stack256 = malloc(stack_size / 32);
+
+    // setup threads
+    result.threads_count = threads_count;
+    result.thread = malloc(threads_count * sizeof(VMThread));
+
+    for(vm_size_t i = 0; i < threads_count; i++) result.thread[i] = _vmThread();
 
     return result;
 }
 
 void vmReleaseInstance(VMInstance* vm){
-    for(vm_size_t i = 0; i < vm->threads_count; i++){
-        int close_server = close(vm->thread[i].server_sock);
-        int close_client = close(vm->thread[i].client_sock);
-    }
+    for(vm_size_t i = 0; i < vm->threads_count; i++) _vmReleaseThread(vm->thread + i);
+
+    vm->threads_count = 0;
+    vm->stack_size = 0;
+
+    free(vm->thread);
+    free(vm->stack8);
+    free(vm->stack16);
+    free(vm->stack32);
+    free(vm->stack64);
+    free(vm->stack128);
+    free(vm->stack256);
 }
 
 
@@ -178,7 +201,7 @@ void vmReleaseInstance(VMInstance* vm){
 
 // Instruction
 typedef enum _VM_INSTRUCTION_TYPE {FREE, SINGLE, DOUBLE, TRIPLE} VM_INSTRUCTION_TYPE;
-typedef enum _VM_OPERAND_TYPE {REGISTER, NUMBER, ADDRESS} VM_OPERAND_TYPE;
+typedef enum _VM_OPERAND_TYPE {REGISTER, NUMBER, CODE_ADDRESS, REGISTER_ADDRESS, STACK_ADDRESS, NETWORK_ADDRESS} VM_OPERAND_TYPE;
 typedef enum _VM_OPERAND_SIZE{
     UINT8_T = 1, UINT16_T = 2,
     UINT32_T = 4, UINT64_T = 8,
@@ -202,12 +225,12 @@ typedef struct VMInstructionDescriptor{
 } VMInstructionDescriptor;
 
 typedef struct VMInstructionDescriptorsTable{
-    const VMInstructionDescriptor idt[VM_IDT_SIZE];
+    const VMInstructionDescriptor* idt;
     vm_size_t size;
 } VMInstructionDescriptorsTable;
 
 typedef struct VMInstructionDescriptorsExt{
-    VMInstructionDescriptorsTable* ext[VM_ID_EXT_SIZE];
+    VMInstructionDescriptorsTable** ext;
     vm_size_t size;
 } VMInstructionDescriptorsExt;
 
@@ -220,7 +243,7 @@ typedef struct VMInstruction{
 } VMInstruction;
 
 typedef struct VMProgram{
-    VMInstruction program[VM_PROGRAM_SIZE];
+    VMInstruction program[1024];
     vm_size_t size;
 } VMProgram;
 
@@ -239,15 +262,22 @@ typedef struct VMParser{
 
 void _vm_go_adr(const vm_uint256_t* adr, vm_size_t thread, VMInstance* vm){
     // go adr
-    vm->thread[thread].rip = *adr;
+    vm->thread[thread].pc = *adr;
 }
 void _vm_go_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     // go r256
     vm_uint8_t _reg = *reg;
 
     if(VM_R256_INDEX_INBOUNDS(_reg))
-        vm->thread[thread].rip = VM_UINT256_T(VM_R256(_reg - 248, *vm));
+        vm->thread[thread].pc = VM_UINT256_T(VM_R256(_reg - 248, *vm));
     else vm->halt = true;
+}
+
+void _vm_ask(const vm_uint64_t* nadr, vm_size_t thread, VMInstance* vm){
+    vm->thread[thread].wait = true;
+}
+void _vm_answer(const vm_uint64_t* nadr, vm_size_t thread, VMInstance* vm){
+    vm->thread[thread].wait = true;
 }
 
 void _vm_snd_r_r(const vm_uint8_t* reg0, const vm_uint8_t* reg1, vm_size_t thread, VMInstance* vm){
@@ -320,33 +350,33 @@ void _vm_snd_num_r256(const vm_uint256_t* num, const vm_uint8_t* reg, vm_size_t 
 
 void _vm_push8_num(const vm_uint8_t* num, vm_size_t thread, VMInstance* vm){
     // push8 num
-    vm->stack8[vm_ui256_to_size_t(vm->rsp8)] = *num;
-    vm->rsp8 = vm_inc_ui256(vm->rsp8);
+    vm->stack8[vm_ui256_to_size_t(vm->se8)] = *num;
+    vm->se8 = vm_inc_ui256(vm->se8);
 }
 void _vm_push16_num(const vm_uint16_t* num, vm_size_t thread, VMInstance* vm){
     // push16 num
-    vm->stack16[vm_ui256_to_size_t(vm->rsp16)] = *num;
-    vm->rsp16 = vm_inc_ui256(vm->rsp16);
+    vm->stack16[vm_ui256_to_size_t(vm->se16)] = *num;
+    vm->se16 = vm_inc_ui256(vm->se16);
 }
 void _vm_push32_num(const vm_uint32_t* num, vm_size_t thread, VMInstance* vm){
     // push32 num
-    vm->stack32[vm_ui256_to_size_t(vm->rsp32)] = *num;
-    vm->rsp32 = vm_inc_ui256(vm->rsp32);
+    vm->stack32[vm_ui256_to_size_t(vm->se32)] = *num;
+    vm->se32 = vm_inc_ui256(vm->se32);
 }
 void _vm_push64_num(const vm_uint64_t* num, vm_size_t thread, VMInstance* vm){
     // push64 num
-    vm->stack64[vm_ui256_to_size_t(vm->rsp64)] = *num;
-    vm->rsp64 = vm_inc_ui256(vm->rsp64);
+    vm->stack64[vm_ui256_to_size_t(vm->se64)] = *num;
+    vm->se64 = vm_inc_ui256(vm->se64);
 }
 void _vm_push128_num(const vm_uint128_t* num, vm_size_t thread, VMInstance* vm){
     // push128 num
-    vm->stack128[vm_ui256_to_size_t(vm->rsp128)] = *num;
-    vm->rsp128 = vm_inc_ui256(vm->rsp128);
+    vm->stack128[vm_ui256_to_size_t(vm->se128)] = *num;
+    vm->se128 = vm_inc_ui256(vm->se128);
 }
 void _vm_push256_num(const vm_uint256_t* num, vm_size_t thread, VMInstance* vm){
     // push256 num
-    vm->stack256[vm_ui256_to_size_t(vm->rsp256)] = *num;
-    vm->rsp256 = vm_inc_ui256(vm->rsp256);
+    vm->stack256[vm_ui256_to_size_t(vm->se256)] = *num;
+    vm->se256 = vm_inc_ui256(vm->se256);
 }
 
 void _vm_push8_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
@@ -354,8 +384,8 @@ void _vm_push8_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     vm_uint8_t _reg = *reg;
 
     if(VM_R8_INDEX_INBOUNDS(_reg)){
-        vm->stack8[vm_ui256_to_size_t(vm->rsp8)] = VM_UINT8_T(VM_R8(*reg - VM_R8_END, *vm));
-        vm->rsp8 = vm_inc_ui256(vm->rsp8);
+        vm->stack8[vm_ui256_to_size_t(vm->se8)] = VM_UINT8_T(VM_R8(*reg - VM_R8_END, *vm));
+        vm->se8 = vm_inc_ui256(vm->se8);
     }else vm->halt = true;
 }
 void _vm_push16_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
@@ -363,8 +393,8 @@ void _vm_push16_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     vm_uint8_t _reg = *reg;
 
     if(VM_R16_INDEX_INBOUNDS(_reg)){
-        vm->stack16[vm_ui256_to_size_t(vm->rsp16)] = VM_UINT16_T(VM_R16(*reg - VM_R16_END, *vm));
-        vm->rsp16 = vm_inc_ui256(vm->rsp16);
+        vm->stack16[vm_ui256_to_size_t(vm->se16)] = VM_UINT16_T(VM_R16(*reg - VM_R16_END, *vm));
+        vm->se16 = vm_inc_ui256(vm->se16);
     }else vm->halt = true;
 }
 void _vm_push32_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
@@ -372,8 +402,8 @@ void _vm_push32_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     vm_uint8_t _reg = *reg;
 
     if(VM_R32_INDEX_INBOUNDS(_reg)){
-        vm->stack32[vm_ui256_to_size_t(vm->rsp32)] = VM_UINT32_T(VM_R32(*reg - VM_R32_END, *vm));
-        vm->rsp32 = vm_inc_ui256(vm->rsp32);
+        vm->stack32[vm_ui256_to_size_t(vm->se32)] = VM_UINT32_T(VM_R32(*reg - VM_R32_END, *vm));
+        vm->se32 = vm_inc_ui256(vm->se32);
     }else vm->halt = true;
 }
 void _vm_push64_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
@@ -381,8 +411,8 @@ void _vm_push64_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     vm_uint8_t _reg = *reg;
 
     if(VM_R64_INDEX_INBOUNDS(_reg)){
-        vm->stack64[vm_ui256_to_size_t(vm->rsp64)] = VM_UINT64_T(VM_R64(*reg - VM_R64_END, *vm));
-        vm->rsp64 = vm_inc_ui256(vm->rsp64);
+        vm->stack64[vm_ui256_to_size_t(vm->se64)] = VM_UINT64_T(VM_R64(*reg - VM_R64_END, *vm));
+        vm->se64 = vm_inc_ui256(vm->se64);
     }else vm->halt = true;
 }
 void _vm_push128_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
@@ -390,8 +420,8 @@ void _vm_push128_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     vm_uint8_t _reg = *reg;
 
     if(VM_R128_INDEX_INBOUNDS(_reg)){
-        vm->stack128[vm_ui256_to_size_t(vm->rsp128)] = VM_UINT128_T(VM_R128(*reg - VM_R128_END, *vm));
-        vm->rsp128 = vm_inc_ui256(vm->rsp128);
+        vm->stack128[vm_ui256_to_size_t(vm->se128)] = VM_UINT128_T(VM_R128(*reg - VM_R128_END, *vm));
+        vm->se128 = vm_inc_ui256(vm->se128);
     }else vm->halt = true;
 }
 void _vm_push256_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
@@ -399,8 +429,8 @@ void _vm_push256_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     vm_uint8_t _reg = *reg;
 
     if(VM_R256_INDEX_INBOUNDS(_reg)){
-        vm->stack256[vm_ui256_to_size_t(vm->rsp256)] = VM_UINT256_T(VM_R256(*reg - VM_R256_END, *vm));
-        vm->rsp256 = vm_inc_ui256(vm->rsp256);
+        vm->stack256[vm_ui256_to_size_t(vm->se256)] = VM_UINT256_T(VM_R256(*reg - VM_R256_END, *vm));
+        vm->se256 = vm_inc_ui256(vm->se256);
     }else vm->halt = true;
 }
 
@@ -409,8 +439,8 @@ void _vm_pop8(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     vm_uint8_t _reg = *reg;
 
     if(VM_R8_INDEX_INBOUNDS(_reg)){
-        vm->rsp8 = vm_dec_ui256(vm->rsp8);
-        VM_UINT8_T(VM_R8(*reg - VM_R8_END, *vm)) = vm->stack8[vm_ui256_to_size_t(vm->rsp8)];
+        vm->se8 = vm_dec_ui256(vm->se8);
+        VM_UINT8_T(VM_R8(*reg - VM_R8_END, *vm)) = vm->stack8[vm_ui256_to_size_t(vm->se8)];
     }else vm->halt = true;
 }
 void _vm_pop16(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
@@ -418,8 +448,8 @@ void _vm_pop16(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     vm_uint8_t _reg = *reg;
 
     if(VM_R16_INDEX_INBOUNDS(_reg)){
-        vm->rsp16 = vm_dec_ui256(vm->rsp16);
-        VM_UINT16_T(VM_R16(*reg - VM_R16_END, *vm)) = vm->stack16[vm_ui256_to_size_t(vm->rsp16)];
+        vm->se16 = vm_dec_ui256(vm->se16);
+        VM_UINT16_T(VM_R16(*reg - VM_R16_END, *vm)) = vm->stack16[vm_ui256_to_size_t(vm->se16)];
     }else vm->halt = true;
 }
 void _vm_pop32(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
@@ -427,8 +457,8 @@ void _vm_pop32(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     vm_uint8_t _reg = *reg;
 
     if(VM_R32_INDEX_INBOUNDS(_reg)){
-        vm->rsp32 = vm_dec_ui256(vm->rsp32);
-        VM_UINT32_T(VM_R32(*reg - VM_R32_END, *vm)) = vm->stack32[vm_ui256_to_size_t(vm->rsp32)];
+        vm->se32 = vm_dec_ui256(vm->se32);
+        VM_UINT32_T(VM_R32(*reg - VM_R32_END, *vm)) = vm->stack32[vm_ui256_to_size_t(vm->se32)];
     }else vm->halt = true;
 }
 void _vm_pop64(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
@@ -436,8 +466,8 @@ void _vm_pop64(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     vm_uint8_t _reg = *reg;
 
     if(VM_R64_INDEX_INBOUNDS(_reg)){
-        vm->rsp64 = vm_dec_ui256(vm->rsp64);
-        VM_UINT64_T(VM_R64(*reg - VM_R64_END, *vm)) = vm->stack64[vm_ui256_to_size_t(vm->rsp64)];
+        vm->se64 = vm_dec_ui256(vm->se64);
+        VM_UINT64_T(VM_R64(*reg - VM_R64_END, *vm)) = vm->stack64[vm_ui256_to_size_t(vm->se64)];
     }else vm->halt = true;
 }
 void _vm_pop128(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
@@ -445,8 +475,8 @@ void _vm_pop128(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     vm_uint8_t _reg = *reg;
 
     if(VM_R128_INDEX_INBOUNDS(_reg)){
-        vm->rsp128 = vm_dec_ui256(vm->rsp128);
-        VM_UINT128_T(VM_R128(*reg - VM_R128_END, *vm)) = vm->stack128[vm_ui256_to_size_t(vm->rsp128)];
+        vm->se128 = vm_dec_ui256(vm->se128);
+        VM_UINT128_T(VM_R128(*reg - VM_R128_END, *vm)) = vm->stack128[vm_ui256_to_size_t(vm->se128)];
     }else vm->halt = true;
 }
 void _vm_pop256(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
@@ -454,8 +484,8 @@ void _vm_pop256(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
     vm_uint8_t _reg = *reg;
 
     if(VM_R256_INDEX_INBOUNDS(_reg)){
-        vm->rsp256 = vm_dec_ui256(vm->rsp256);
-        VM_UINT256_T(VM_R256(*reg - VM_R256_END, *vm)) = vm->stack256[vm_ui256_to_size_t(vm->rsp256)];
+        vm->se256 = vm_dec_ui256(vm->se256);
+        VM_UINT256_T(VM_R256(*reg - VM_R256_END, *vm)) = vm->stack256[vm_ui256_to_size_t(vm->se256)];
     }else vm->halt = true;
 }
 
@@ -502,243 +532,260 @@ void _vm_dec_r_r(const vm_uint8_t* reg0, const vm_uint8_t* reg1, vm_size_t threa
 /////////////////////////////////////////////////////
 //       GLOBAL INSTRUCTION DESCRIPTORS TABLE
 /////////////////////////////////////////////////////
+VMInstructionDescriptor _GIDT[31] = {
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = CODE_ADDRESS,
+        .op0_size = UINT32_T,
+        .icode = {0x00, 0x00, 0x00, 0x01},
+        .alias = "go",
+        .impl = _vm_go_adr
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x02},
+        .alias = "go",
+        .impl = _vm_go_r
+    },
+    (VMInstructionDescriptor){
+        .itype = DOUBLE,
+        .op0_type = REGISTER, .op1_type = REGISTER,
+        .op0_size = UINT8_T, .op1_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x03},
+        .alias = "snd",
+        .impl = _vm_snd_r_r
+    },
+    (VMInstructionDescriptor){
+        .itype = DOUBLE,
+        .op0_type = NUMBER, .op1_type = REGISTER,
+        .op0_size = UINT8_T, .op1_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x04},
+        .alias = "snd",
+        .impl = _vm_snd_num_r8
+    },
+    (VMInstructionDescriptor){
+        .itype = DOUBLE,
+        .op0_type = NUMBER, .op1_type = REGISTER,
+        .op0_size = UINT16_T, .op1_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x05},
+        .alias = "snd",
+        .impl = _vm_snd_num_r16
+    },
+    (VMInstructionDescriptor){
+        .itype = DOUBLE,
+        .op0_type = NUMBER, .op1_type = REGISTER,
+        .op0_size = UINT32_T, .op1_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x06},
+        .alias = "snd",
+        .impl = _vm_snd_num_r32
+    },
+    (VMInstructionDescriptor){
+        .itype = DOUBLE,
+        .op0_type = NUMBER, .op1_type = REGISTER,
+        .op0_size = UINT64_T, .op1_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x07},
+        .alias = "snd",
+        .impl = _vm_snd_num_r64
+    },
+    (VMInstructionDescriptor){
+        .itype = DOUBLE,
+        .op0_type = NUMBER, .op1_type = REGISTER,
+        .op0_size = UINT128_T, .op1_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x08},
+        .alias = "snd",
+        .impl = _vm_snd_num_r128
+    },
+    (VMInstructionDescriptor){
+        .itype = DOUBLE,
+        .op0_type = NUMBER, .op1_type = REGISTER,
+        .op0_size = UINT256_T, .op1_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x09},
+        .alias = "snd",
+        .impl = _vm_snd_num_r256
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = NUMBER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x0a},
+        .alias = "push8",
+        .impl = _vm_push8_num
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = NUMBER,
+        .op0_size = UINT16_T,
+        .icode = {0x00, 0x00, 0x00, 0x0b},
+        .alias = "push16",
+        .impl = _vm_push16_num
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = NUMBER,
+        .op0_size = UINT32_T,
+        .icode = {0x00, 0x00, 0x00, 0x0c},
+        .alias = "push32",
+        .impl = _vm_push32_num
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = NUMBER,
+        .op0_size = UINT64_T,
+        .icode = {0x00, 0x00, 0x00, 0x0d},
+        .alias = "push64",
+        .impl = _vm_push64_num
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = NUMBER,
+        .op0_size = UINT128_T,
+        .icode = {0x00, 0x00, 0x00, 0x0e},
+        .alias = "push128",
+        .impl = _vm_push128_num
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = NUMBER,
+        .op0_size = UINT256_T,
+        .icode = {0x00, 0x00, 0x00, 0x0f},
+        .alias = "push256",
+        .impl = _vm_push256_num
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x10},
+        .alias = "push8",
+        .impl = _vm_push8_r
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x11},
+        .alias = "push16",
+        .impl = _vm_push16_r
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x12},
+        .alias = "push32",
+        .impl = _vm_push32_r
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x13},
+        .alias = "push64",
+        .impl = _vm_push64_r
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x14},
+        .alias = "push128",
+        .impl = _vm_push128_r
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x15},
+        .alias = "push256",
+        .impl = _vm_push256_r
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x16},
+        .alias = "pop8",
+        .impl = _vm_pop8
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x17},
+        .alias = "pop16",
+        .impl = _vm_pop16
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x18},
+        .alias = "pop32",
+        .impl = _vm_pop32
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x19},
+        .alias = "pop64",
+        .impl = _vm_pop64
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x1a},
+        .alias = "pop128",
+        .impl = _vm_pop128
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = REGISTER,
+        .op0_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x1b},
+        .alias = "pop256",
+        .impl = _vm_pop256
+    },
+    (VMInstructionDescriptor){
+        .itype = DOUBLE,
+        .op0_type = REGISTER, .op1_type = REGISTER,
+        .op0_size = UINT8_T, .op1_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x1c},
+        .alias = "inc",
+        .impl = _vm_inc_r_r
+    },
+    (VMInstructionDescriptor){
+        .itype = DOUBLE,
+        .op0_type = REGISTER, .op1_type = REGISTER,
+        .op0_size = UINT8_T, .op1_size = UINT8_T,
+        .icode = {0x00, 0x00, 0x00, 0x1d},
+        .alias = "dec",
+        .impl = _vm_dec_r_r
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = NETWORK_ADDRESS,
+        .op0_size = UINT64_T,
+        .icode = {0x00, 0x00, 0x00, 0x20},
+        .alias = "ask",
+        .impl = _vm_ask
+    },
+    (VMInstructionDescriptor){
+        .itype = SINGLE,
+        .op0_type = NETWORK_ADDRESS,
+        .op0_size = UINT64_T,
+        .icode = {0x00, 0x00, 0x00, 0x21},
+        .alias = "answer",
+        .impl = _vm_answer
+    }
+};
 
 VMInstructionDescriptorsTable GIDT = {
-    .idt = {
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = ADDRESS,
-            .op0_size = UINT32_T,
-            .icode = {0x00, 0x00, 0x00, 0x01},
-            .alias = "go",
-            .impl = _vm_go_adr
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x02},
-            .alias = "go",
-            .impl = _vm_go_r
-        },
-        (VMInstructionDescriptor){
-            .itype = DOUBLE,
-            .op0_type = REGISTER, .op1_type = REGISTER,
-            .op0_size = UINT8_T, .op1_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x03},
-            .alias = "snd",
-            .impl = _vm_snd_r_r
-        },
-        (VMInstructionDescriptor){
-            .itype = DOUBLE,
-            .op0_type = NUMBER, .op1_type = REGISTER,
-            .op0_size = UINT8_T, .op1_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x04},
-            .alias = "snd",
-            .impl = _vm_snd_num_r8
-        },
-        (VMInstructionDescriptor){
-            .itype = DOUBLE,
-            .op0_type = NUMBER, .op1_type = REGISTER,
-            .op0_size = UINT16_T, .op1_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x05},
-            .alias = "snd",
-            .impl = _vm_snd_num_r16
-        },
-        (VMInstructionDescriptor){
-            .itype = DOUBLE,
-            .op0_type = NUMBER, .op1_type = REGISTER,
-            .op0_size = UINT32_T, .op1_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x06},
-            .alias = "snd",
-            .impl = _vm_snd_num_r32
-        },
-        (VMInstructionDescriptor){
-            .itype = DOUBLE,
-            .op0_type = NUMBER, .op1_type = REGISTER,
-            .op0_size = UINT64_T, .op1_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x07},
-            .alias = "snd",
-            .impl = _vm_snd_num_r64
-        },
-        (VMInstructionDescriptor){
-            .itype = DOUBLE,
-            .op0_type = NUMBER, .op1_type = REGISTER,
-            .op0_size = UINT128_T, .op1_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x08},
-            .alias = "snd",
-            .impl = _vm_snd_num_r128
-        },
-        (VMInstructionDescriptor){
-            .itype = DOUBLE,
-            .op0_type = NUMBER, .op1_type = REGISTER,
-            .op0_size = UINT256_T, .op1_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x09},
-            .alias = "snd",
-            .impl = _vm_snd_num_r256
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = NUMBER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x0a},
-            .alias = "push8",
-            .impl = _vm_push8_num
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = NUMBER,
-            .op0_size = UINT16_T,
-            .icode = {0x00, 0x00, 0x00, 0x0b},
-            .alias = "push16",
-            .impl = _vm_push16_num
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = NUMBER,
-            .op0_size = UINT32_T,
-            .icode = {0x00, 0x00, 0x00, 0x0c},
-            .alias = "push32",
-            .impl = _vm_push32_num
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = NUMBER,
-            .op0_size = UINT64_T,
-            .icode = {0x00, 0x00, 0x00, 0x0d},
-            .alias = "push64",
-            .impl = _vm_push64_num
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = NUMBER,
-            .op0_size = UINT128_T,
-            .icode = {0x00, 0x00, 0x00, 0x0e},
-            .alias = "push128",
-            .impl = _vm_push128_num
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = NUMBER,
-            .op0_size = UINT256_T,
-            .icode = {0x00, 0x00, 0x00, 0x0f},
-            .alias = "push256",
-            .impl = _vm_push256_num
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x10},
-            .alias = "push8",
-            .impl = _vm_push8_r
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x11},
-            .alias = "push16",
-            .impl = _vm_push16_r
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x12},
-            .alias = "push32",
-            .impl = _vm_push32_r
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x13},
-            .alias = "push64",
-            .impl = _vm_push64_r
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x14},
-            .alias = "push128",
-            .impl = _vm_push128_r
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x15},
-            .alias = "push256",
-            .impl = _vm_push256_r
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x16},
-            .alias = "pop8",
-            .impl = _vm_pop8
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x17},
-            .alias = "pop16",
-            .impl = _vm_pop16
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x18},
-            .alias = "pop32",
-            .impl = _vm_pop32
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x19},
-            .alias = "pop64",
-            .impl = _vm_pop64
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x1a},
-            .alias = "pop128",
-            .impl = _vm_pop128
-        },
-        (VMInstructionDescriptor){
-            .itype = SINGLE,
-            .op0_type = REGISTER,
-            .op0_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x1b},
-            .alias = "pop256",
-            .impl = _vm_pop256
-        },
-        (VMInstructionDescriptor){
-            .itype = DOUBLE,
-            .op0_type = REGISTER, .op1_type = REGISTER,
-            .op0_size = UINT8_T, .op1_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x1c},
-            .alias = "inc",
-            .impl = _vm_inc_r_r
-        },
-        (VMInstructionDescriptor){
-            .itype = DOUBLE,
-            .op0_type = REGISTER, .op1_type = REGISTER,
-            .op0_size = UINT8_T, .op1_size = UINT8_T,
-            .icode = {0x00, 0x00, 0x00, 0x1d},
-            .alias = "dec",
-            .impl = _vm_dec_r_r
-        }
-    },
-    .size = 29
+    .idt = _GIDT,
+    .size = 32
 };
 
 
@@ -795,8 +842,8 @@ void vmExecInstruction(const VMInstruction* instr, vm_size_t thread, VMInstance*
 // single thread
 void vmExecProgram(const VMProgram* prog, vm_size_t thread, VMInstance* vm, const VMInstructionDescriptorsExt* ext){
     if(thread < vm->threads_count){
-        if(vm->thread[thread].halt == false){
-            VM_UINT256_T(vm->thread[thread].rip) = (vm_uint256_t){
+        if(vm->thread[thread].lock == false){
+            VM_UINT256_T(vm->thread[thread].pc) = (vm_uint256_t){
                 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00,
@@ -807,10 +854,13 @@ void vmExecProgram(const VMProgram* prog, vm_size_t thread, VMInstance* vm, cons
                 0x00, 0x00, 0x00, 0x00
             };
 
-            for(vm_size_t i = 0; i < prog->size; i++){
+            for(vm_size_t i = 0; i < prog->size;){
                 if(vm->halt) break;
-                vmExecInstruction(prog->program + vm_ui256_to_size_t(vm->thread[thread].rip), thread, vm, ext);
-                VM_UINT256_T(vm->thread[thread].rip) = vm_inc_ui256(VM_UINT256_T(vm->thread[thread].rip));
+                vmExecInstruction(prog->program + vm_ui256_to_size_t(vm->thread[thread].pc), thread, vm, ext);
+                if(vm->thread[thread].wait == false){
+                    VM_UINT256_T(vm->thread[thread].pc) = vm_inc_ui256(VM_UINT256_T(vm->thread[thread].pc));
+                    i++;
+                }
             }
         }
     } else vm->halt = true;
