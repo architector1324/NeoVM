@@ -4,12 +4,12 @@
 
 ## Overview
 - Lightweight
-- Platform-independed
+- Crossplatform
 - Hardware-independed
 - Easy to extend instruction set (add your own instructions)
 - Realtime and programmed instruction execution modes
 - Fake multithreading ([TDM](https://en.wikipedia.org/wiki/Time-division_multiplexing))
-- Networking
+- Networking ([TCP / IP](https://ru.wikipedia.org/wiki/TCP/IP))
 
 
 **Features:**
@@ -127,6 +127,14 @@ instr stack{k}_adr [stack256_adr num256]  ; stack{k} address stored in stack256
 ```
 
 *Note*: For short form we will use `code_adr`, `reg_adr` and `stack_adr` next.
+
+**Networking**:
+Connect to Instance, do some instruction, wait for response (or receive data) and disconnect:
+```
+instr {ip / port}  ; hang thread until response
+```
+
+*Note*: Each Instance is working as server and client at the same time. You can use instructions to send and receive some data by network without unnecessary trouble!
 
 **Base instruction set**:
 

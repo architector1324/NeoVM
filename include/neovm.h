@@ -1,5 +1,9 @@
 #pragma once
 #include "neovm_types.h"
+#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #ifndef VM_STACK_SIZE
 #define VM_STACK_SIZE 8192
@@ -59,15 +63,10 @@ typedef struct vm_r256{
 
 typedef struct VMThread{
     vm_uint256_t rip;
-    vm_uint16_t port;
     vm_bool halt;
 
-    vm_uint8_t net_buf8;
-    vm_uint16_t net_buf16;
-    vm_uint32_t net_buf32;
-    vm_uint64_t net_buf64;
-    vm_uint128_t net_buf128;
-    vm_uint256_t net_buf256;
+    int server_sock;
+    int client_sock;
 } VMThread;
 
 
@@ -80,8 +79,6 @@ typedef struct VMInstance{
     VMThread thread[VM_MAX_INSTANCE_THREADS];
     vm_size_t threads_count;
 
-    vm_uint32_t ip;
-
     // stacks
     vm_uint256_t stack256[VM_STACK_SIZE / 32];
     vm_uint128_t stack128[VM_STACK_SIZE / 16];
@@ -91,10 +88,54 @@ typedef struct VMInstance{
     vm_uint8_t stack8[VM_STACK_SIZE];
 } VMInstance;
 
-#define VMInstanceDefault (VMInstance){\
-    .halt = false,\
-    .threads_count = 1\
-};
+
+VMInstance vmInstance(vm_size_t threads_count){
+    VMInstance result = {.threads_count = threads_count};
+
+    for(vm_size_t i = 0; i < threads_count; i++){
+        result.thread[i].rip = (vm_uint256_t){
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        };
+
+        int server_sock = socket(AF_INET, SOCK_STREAM, 0);
+        int client_sock = socket(AF_INET, SOCK_STREAM, 0);
+
+        result.thread[i].server_sock = server_sock;
+        result.thread[i].client_sock = client_sock;
+
+        struct sockaddr_in server_adr = {
+            .sin_family = AF_INET,
+            .sin_port = htons(60000 + 2 * i),
+            .sin_addr.s_addr = htonl(INADDR_LOOPBACK)
+        };
+        struct sockaddr_in client_adr = {
+            .sin_family = AF_INET,
+            .sin_port = htons(60000 + 2 * i + 1),
+            .sin_addr.s_addr = htonl(INADDR_ANY)
+        };
+
+        int server_binded = bind(server_sock, (struct sockaddr*)&server_adr, sizeof(server_adr));
+        int client_binded = bind(client_sock, (struct sockaddr*)&client_adr, sizeof(client_adr));
+
+        int listening = listen(server_sock, 1);
+    }
+
+    return result;
+}
+
+void vmReleaseInstance(VMInstance* vm){
+    for(vm_size_t i = 0; i < vm->threads_count; i++){
+        int close_server = close(vm->thread[i].server_sock);
+        int close_client = close(vm->thread[i].client_sock);
+    }
+}
 
 
 // register macros
@@ -773,6 +814,10 @@ void vmExecProgram(const VMProgram* prog, vm_size_t thread, VMInstance* vm, cons
             }
         }
     } else vm->halt = true;
+}
+
+void vmExecProgramMT(const VMProgram* progs, vm_size_t progs_count, VMInstance* vm, const VMInstructionDescriptorsExt* ext){
+    
 }
 
 // multithread
