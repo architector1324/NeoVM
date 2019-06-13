@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 #include <unistd.h>
 
 #include "neovm_types.h"
@@ -48,7 +49,7 @@ typedef struct VMThread{
     vm_uint256_t pc; // program counter
     vm_bool lock, wait;
 
-    int ssck, csck; // client / server socket
+    int sock; // client / server socket
 
     vm_uint8_t nbuf8; // 8-bit net buffer
     vm_uint16_t nbuf16;
@@ -68,6 +69,9 @@ typedef struct VMInstance{
     VMThread* thread;
     vm_size_t threads_count;
 
+    vm_uint32_t ip;
+    vm_uint16_t port;
+
     // stacks
     vm_uint256_t* stack256;
     vm_uint128_t* stack128;
@@ -79,7 +83,7 @@ typedef struct VMInstance{
     vm_size_t stack_size;
 } VMInstance;
 
-VMThread _vmThread(){
+VMThread _vmThread(VMInstance* vm, vm_size_t thread){
     VMThread result;
 
     result.pc = (vm_uint256_t){
@@ -96,10 +100,15 @@ VMThread _vmThread(){
     result.wait = false;
 
 
-    result.csck = socket(AF_INET, SOCK_STREAM, 0);
-    result.ssck = socket(AF_INET, SOCK_STREAM, 0);
+    // network
+    result.sock = socket(AF_INET, SOCK_DGRAM, 0);
 
+    struct sockaddr_in adr;
+    adr.sin_family = AF_INET;
+    adr.sin_addr.s_addr = *((uint32_t*)&vm->ip);
+    adr.sin_port = htons(ntohs(*((uint16_t*)&vm->port)) + thread);
 
+    if(bind(result.sock, (const struct sockaddr*)&adr, sizeof(adr)) < 0) vm->thread[thread].lock = true;
 
     return result;
 }
@@ -118,29 +127,39 @@ void _vmReleaseThread(VMThread* thread){
     thread->lock = false;
     thread->wait = false;
 
-    close(thread->csck);
-    close(thread->ssck);
-
-    thread->csck = 0;
-    thread->ssck = 0;
+    close(thread->sock);
+    thread->sock = 0;
 }
 
-VMInstance vmInstance(vm_size_t threads_count, vm_size_t stack_size){
-    VMInstance result = {.halt = false};
+VMInstance vmInstance(vm_size_t threads_count, vm_size_t stack_size, vm_uint32_t ip, vm_uint16_t port){
+    VMInstance result = {
+        .halt = false,
+        .ip = ip, 
+        .port = port
+    };
 
     // setup stack
-    result.stack8 = malloc(stack_size);
-    result.stack16 = malloc(stack_size / 2);
-    result.stack32 = malloc(stack_size / 4);
-    result.stack64 = malloc(stack_size / 8);
-    result.stack128 = malloc(stack_size / 16);
-    result.stack256 = malloc(stack_size / 32);
+    if(stack_size != 0){
+        result.stack8 = malloc(stack_size);
+        result.stack16 = malloc(stack_size / 2);
+        result.stack32 = malloc(stack_size / 4);
+        result.stack64 = malloc(stack_size / 8);
+        result.stack128 = malloc(stack_size / 16);
+        result.stack256 = malloc(stack_size / 32);
+    }else{
+        result.stack8 = NULL;
+        result.stack16 = NULL;
+        result.stack32 = NULL;
+        result.stack64 = NULL;
+        result.stack128 = NULL;
+        result.stack256 = NULL;
+    }
 
     // setup threads
     result.threads_count = threads_count;
     result.thread = malloc(threads_count * sizeof(VMThread));
 
-    for(vm_size_t i = 0; i < threads_count; i++) result.thread[i] = _vmThread();
+    for(vm_size_t i = 0; i < threads_count; i++) result.thread[i] = _vmThread(&result, i);
 
     return result;
 }
@@ -150,6 +169,8 @@ void vmReleaseInstance(VMInstance* vm){
 
     vm->threads_count = 0;
     vm->stack_size = 0;
+    vm->ip = (vm_uint32_t){0, 0, 0, 0};
+    vm->port = (vm_uint16_t){0, 0};
 
     free(vm->thread);
     free(vm->stack8);
@@ -274,10 +295,39 @@ void _vm_go_r(const vm_uint8_t* reg, vm_size_t thread, VMInstance* vm){
 }
 
 void _vm_ask(const vm_uint64_t* nadr, vm_size_t thread, VMInstance* vm){
-    vm->thread[thread].wait = true;
+    vm_bool hang = true;
+
+    struct sockaddr_in adr;
+
+    vm_uint16_t port = {nadr->bytes[4], nadr->bytes[5]};
+    vm_uint32_t ip = {nadr->bytes[0], nadr->bytes[1], nadr->bytes[2], nadr->bytes[3]};
+
+    adr.sin_family = AF_INET; 
+    adr.sin_port = *((const uint16_t*)&port);
+    adr.sin_addr.s_addr = *((const uint32_t*)&ip);
+
+    if(vm->thread[thread].wait == false){
+        sendto(vm->thread[thread].sock, &hang, 1, MSG_CONFIRM, (const struct sockaddr*)&adr, sizeof(adr));
+        vm->thread[thread].wait = true;
+    }
+
+    int len;
+    if(recvfrom(vm->thread[thread].sock, &hang, 1, MSG_DONTWAIT, (struct sockaddr*)&adr, &len) > 0) vm->thread[thread].wait = false;
+
+    int dump = 0;
 }
-void _vm_answer(const vm_uint64_t* nadr, vm_size_t thread, VMInstance* vm){
+void _vm_answer(vm_size_t thread, VMInstance* vm){
+    vm_bool hang = true;
     vm->thread[thread].wait = true;
+
+    int len;
+
+    struct sockaddr_in adr;
+
+    if(recvfrom(vm->thread[thread].sock, &hang, 1, MSG_DONTWAIT, (struct sockaddr*)&adr, &len) > 0){
+        sendto(vm->thread[thread].sock, &hang, 1, MSG_CONFIRM, (const struct sockaddr*)&adr, sizeof(adr));
+        vm->thread[thread].wait = false;
+    }
 }
 
 void _vm_snd_r_r(const vm_uint8_t* reg0, const vm_uint8_t* reg1, vm_size_t thread, VMInstance* vm){
@@ -774,9 +824,7 @@ VMInstructionDescriptor _GIDT[31] = {
         .impl = _vm_ask
     },
     (VMInstructionDescriptor){
-        .itype = SINGLE,
-        .op0_type = NETWORK_ADDRESS,
-        .op0_size = UINT64_T,
+        .itype = FREE,
         .icode = {0x00, 0x00, 0x00, 0x21},
         .alias = "answer",
         .impl = _vm_answer
@@ -792,6 +840,7 @@ VMInstructionDescriptorsTable GIDT = {
 /////////////////////////////////////////
 //               METHODS
 /////////////////////////////////////////
+
 const VMInstructionDescriptor* _vmFindInstructionIDT(const vm_uint32_t* icode, const VMInstructionDescriptorsTable* idt){
     vm_size_t size = idt->size;
 
@@ -914,12 +963,12 @@ VMParser vmParseInstruction(const vm_uint8_t* bytecode, const VMInstructionDescr
     return result;
 }
 
-VMProgram vmParseProgram(const vm_uint8_t* bytecode, const VMInstructionDescriptorsExt* ext){
+VMProgram vmParseProgram(const vm_uint8_t* bytecode, vm_size_t prog_size, const VMInstructionDescriptorsExt* ext){
     VMProgram result = {.size = 0};
 
     VMParser parser = vmParseInstruction(bytecode, ext);
 
-    while(parser.instr.icode != NULL){
+    while(parser.instr.icode != NULL && result.size < prog_size){
         result.program[result.size++] = parser.instr;
         parser = vmParseInstruction(parser.next, ext);
     }
