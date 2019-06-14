@@ -128,6 +128,14 @@ instr stack{k}_adr [stack256_adr num256]  ; stack{k} address stored in stack256
 
 *Note*: For short form we will use `code_adr`, `reg_adr` and `stack_adr` next.
 
+**Multithreading**:
+```
+; mutex
+lock    ; lock all threads except current
+; some code
+unlock  ; unlock all threads except current
+```
+
 **Networking**:
 Comming soon...
 ```

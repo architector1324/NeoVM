@@ -10,14 +10,14 @@ int main(){
 
     // program
     /*
-        rip: assembly ; bytecode
-        0  : ask {127.0.0.1 / 60000 / 0} ; 0x00000020 0x7f000001ea600000
+        rip: assembly                       ; bytecode
+        0  : ask {192.168.1.52 / 60000 / 0} ; 0x00000020 0xc0a80134ea600000
     */
 
 
     vm_uint8_t bytecode[12] = {
         0x00, 0x00, 0x00, 0x20,
-        0x7f, 0x00, 0x00, 0x01,
+        0xc0, 0xa8, 0x01, 0x34,
         0xea, 0x60, 0x00, 0x00
     };
 

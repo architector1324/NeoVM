@@ -6,7 +6,7 @@
 
 
 int main(){
-    VMInstance vm = vmInstance(1, 8192, (vm_uint32_t){127, 0, 0, 1}, (vm_uint16_t){0xea, 0x60});
+    VMInstance vm = vmInstance(1, 8192, (vm_uint32_t){192, 168, 1, 52}, (vm_uint16_t){0xea, 0x60});
 
     // program
     /*
