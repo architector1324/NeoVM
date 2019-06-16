@@ -43,7 +43,6 @@ int main(){
         0x00, 0x1c, 0x01, 0x00
     };
 
-
     VMProgram prog0 = vmParseProgram(code0, 5, NULL);
     VMProgram prog1 = vmParseProgram(code1, 2, NULL);
 
@@ -65,6 +64,9 @@ int main(){
 
     printf("r8_0 = %d\nr8_1 = %d\n", VM_R8(0, vm), VM_R8(1, vm));
 
+
+    vmReleaseProgram(&prog0);
+    vmReleaseProgram(&prog1);
     vmReleaseInstance(&vm);
 
     return 0;

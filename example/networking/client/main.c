@@ -23,8 +23,12 @@ int main(){
 
 
     VMProgram prog = vmParseProgram(bytecode, 1, NULL);
-    vmExecProgram(&prog, 0, &vm, NULL);
+    VMExec exec = {
+        .prog = &prog,
+        .thread = 0
+    };
 
+    vmExecProgram(&exec, &vm, NULL);
     printf("Client asked\n");
 
 

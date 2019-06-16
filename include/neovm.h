@@ -264,9 +264,13 @@ typedef struct VMInstruction{
 } VMInstruction;
 
 typedef struct VMProgram{
-    VMInstruction program[1024];
+    VMInstruction* program;
     vm_size_t size;
 } VMProgram;
+
+void vmReleaseProgram(VMProgram* prog){
+    free(prog->program);
+}
 
 typedef struct VMExec{
     vm_size_t thread;
@@ -317,7 +321,7 @@ void _vm_ask(const vm_uint64_t* nadr, vm_size_t thread, VMInstance* vm){
     }
 
     int len;
-    if(recvfrom(vm->thread[thread].sock, &hang, 1, MSG_DONTWAIT, (struct sockaddr*)&adr, &len) > 0) vm->thread[thread].wait = false;
+    if(recvfrom(vm->thread[thread].sock, &hang, 1, MSG_DONTWAIT, NULL, &len) > 0) vm->thread[thread].wait = false;
 
     int dump = 0;
 }
@@ -916,11 +920,13 @@ void vmExecInstruction(const VMInstruction* instr, vm_size_t thread, VMInstance*
 }
 
 // single thread
-void vmExecProgram(const VMProgram* prog, vm_size_t thread, VMInstance* vm, const VMInstructionDescriptorsExt* ext){
-    if(thread < vm->threads_count){
-        if(vm->thread[thread].lock == false){
+void vmExecProgram(const VMExec* exec, VMInstance* vm, const VMInstructionDescriptorsExt* ext){
+    VMThread* thread = &vm->thread[exec->thread];
+
+    if(exec->thread < vm->threads_count){
+        if(thread->lock == false){
             // init thread
-            VM_UINT256_T(vm->thread[thread].pc) = (vm_uint256_t){
+            VM_UINT256_T(thread->pc) = (vm_uint256_t){
                 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00,
@@ -932,11 +938,12 @@ void vmExecProgram(const VMProgram* prog, vm_size_t thread, VMInstance* vm, cons
             };
 
             // execute program
-            for(vm_size_t i = 0; i < prog->size;){
+            for(vm_size_t i = 0; i < exec->prog->size;){
                 if(vm->halt) break;
-                vmExecInstruction(prog->program + vm_ui256_to_size_t(vm->thread[thread].pc), thread, vm, ext);
-                if(vm->thread[thread].wait == false){
-                    VM_UINT256_T(vm->thread[thread].pc) = vm_inc_ui256(VM_UINT256_T(vm->thread[thread].pc));
+                vmExecInstruction(exec->prog->program + vm_ui256_to_size_t(thread->pc), exec->thread, vm, ext);
+
+                if(thread->wait == false){
+                    VM_UINT256_T(thread->pc) = vm_inc_ui256(VM_UINT256_T(thread->pc));
                     i++;
                 }
             }
@@ -948,9 +955,11 @@ void vmExecProgram(const VMProgram* prog, vm_size_t thread, VMInstance* vm, cons
 void vmExecProgramMT(const VMExec* exec, vm_size_t exec_count, VMInstance* vm, const VMInstructionDescriptorsExt* ext){
     // init threads
     for(vm_size_t i = 0; i < exec_count; i++){
+        VMThread* thread = &vm->thread[exec[i].thread];
+
         if(exec[i].thread < vm->threads_count){
-            if(vm->thread[exec[i].thread].lock == false){
-                VM_UINT256_T(vm->thread[exec[i].thread].pc) = (vm_uint256_t){
+            if(thread->lock == false){
+                VM_UINT256_T(thread->pc) = (vm_uint256_t){
                     0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x00, 0x00,
@@ -973,12 +982,15 @@ void vmExecProgramMT(const VMExec* exec, vm_size_t exec_count, VMInstance* vm, c
     while(!stop){
         stop = true;
         for(vm_size_t i = 0; i < exec_count; i++){
-            if(vm->thread[exec[i].thread].lock == false){
-                if(vm_ui256_to_size_t(vm->thread[i].pc) < exec[i].prog->size){
+            VMThread* thread = &vm->thread[exec[i].thread];
+
+            if(thread->lock == false){
+                if(vm_ui256_to_size_t(thread->pc) < exec[i].prog->size){
                     if(vm->halt) return;
-                    vmExecInstruction(exec[i].prog->program + vm_ui256_to_size_t(vm->thread[i].pc), i, vm, ext);
-                    if(vm->thread[i].wait == false)
-                        VM_UINT256_T(vm->thread[i].pc) = vm_inc_ui256(VM_UINT256_T(vm->thread[i].pc));
+                    vmExecInstruction(exec[i].prog->program + vm_ui256_to_size_t(thread->pc), exec[i].thread, vm, ext);
+
+                    if(thread->wait == false)
+                        VM_UINT256_T(thread->pc) = vm_inc_ui256(VM_UINT256_T(thread->pc));
                     stop = false;
                 }
             }
@@ -1030,6 +1042,7 @@ VMParser vmParseInstruction(const vm_uint8_t* bytecode, const VMInstructionDescr
 
 VMProgram vmParseProgram(const vm_uint8_t* bytecode, vm_size_t prog_size, const VMInstructionDescriptorsExt* ext){
     VMProgram result = {.size = 0};
+    result.program = malloc(prog_size * sizeof(VMInstruction));
 
     VMParser parser = vmParseInstruction(bytecode, ext);
 
@@ -1037,6 +1050,8 @@ VMProgram vmParseProgram(const vm_uint8_t* bytecode, vm_size_t prog_size, const 
         result.program[result.size++] = parser.instr;
         parser = vmParseInstruction(parser.next, ext);
     }
+
+    if(result.size != prog_size) ; // do some exception here
 
     return result;
 }
