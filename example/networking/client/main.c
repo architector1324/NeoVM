@@ -10,8 +10,8 @@ int main(){
 
     // program
     /*
-        rip: assembly                       ; bytecode
-        0  : ask {192.168.1.52 / 60000 / 0} ; 0x00000020 0xc0a80134ea600000
+        pc: assembly                       ; bytecode
+        0 : ask {192.168.1.52 / 60000 / 0} ; 0x00000020 0xc0a80134ea600000
     */
 
 
@@ -28,7 +28,7 @@ int main(){
         .thread = 0
     };
 
-    vmExecProgram(&exec, &vm, NULL);
+    vmExecProgram(&exec, 1, &vm, NULL);
     printf("Client asked\n");
 
 

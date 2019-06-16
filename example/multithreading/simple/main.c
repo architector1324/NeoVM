@@ -10,19 +10,19 @@ int main(){
 
     // code0
     /*
-        rip: assembly          ; bytecode
-        0  : snd 5, r8_0       ; 0x00000004 0x05 0x00
-        1  : lock              ; 0x0000001e
-        2  : inc r8_0, r8_1    ; 0x0000001c 0x00 0x01
-        3  : inc r8_1, r8_1    ; 0x0000001c 0x01 0x01
-        4  : unlock            ; 0x0000001f
+        pc: assembly          ; bytecode
+        0 : snd 5, r8_0       ; 0x00000004 0x05 0x00
+        1 : lock              ; 0x0000001e
+        2 : inc r8_0, r8_1    ; 0x0000001c 0x00 0x01
+        3 : inc r8_1, r8_1    ; 0x0000001c 0x01 0x01
+        4 : unlock            ; 0x0000001f
     */
 
    // code1
    /*
-        rip: assembly        ; bytecode
-        0  : snd 2, r8_1     ; 0x00000004 0x00 0x01
-        1  : inc r8_1, r8_0  ; 0x0000001c 0x01 0x00
+        pc: assembly        ; bytecode
+        0 : snd 2, r8_1     ; 0x00000004 0x00 0x01
+        1 : inc r8_1, r8_0  ; 0x0000001c 0x01 0x00
 
    */
 
@@ -57,7 +57,7 @@ int main(){
         }
     };
 
-    vmExecProgramMT(prog, 2, &vm, NULL);
+    vmExecProgram(prog, 2, &vm, NULL);
 
     if(vm.halt)
         printf("Wrong instruction! VMInstance %p halted\n", &vm);

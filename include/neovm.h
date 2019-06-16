@@ -919,40 +919,8 @@ void vmExecInstruction(const VMInstruction* instr, vm_size_t thread, VMInstance*
     }else ; // do some exception here
 }
 
-// single thread
-void vmExecProgram(const VMExec* exec, VMInstance* vm, const VMInstructionDescriptorsExt* ext){
-    VMThread* thread = &vm->thread[exec->thread];
 
-    if(exec->thread < vm->threads_count){
-        if(thread->lock == false){
-            // init thread
-            VM_UINT256_T(thread->pc) = (vm_uint256_t){
-                0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00
-            };
-
-            // execute program
-            for(vm_size_t i = 0; i < exec->prog->size;){
-                if(vm->halt) break;
-                vmExecInstruction(exec->prog->program + vm_ui256_to_size_t(thread->pc), exec->thread, vm, ext);
-
-                if(thread->wait == false){
-                    VM_UINT256_T(thread->pc) = vm_inc_ui256(VM_UINT256_T(thread->pc));
-                    i++;
-                }
-            }
-        }
-    } else vm->halt = true;
-}
-
-// multithread
-void vmExecProgramMT(const VMExec* exec, vm_size_t exec_count, VMInstance* vm, const VMInstructionDescriptorsExt* ext){
+void vmExecProgram(const VMExec* exec, vm_size_t exec_count, VMInstance* vm, const VMInstructionDescriptorsExt* ext){
     // init threads
     for(vm_size_t i = 0; i < exec_count; i++){
         VMThread* thread = &vm->thread[exec[i].thread];

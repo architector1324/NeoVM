@@ -10,8 +10,8 @@ int main(){
 
     // program
     /*
-        rip: assembly  ; bytecode
-        0  : answer    ; 0x00000021
+        pc: assembly  ; bytecode
+        0 : answer    ; 0x00000021
     */
 
     vm_uint8_t bytecode[4] = {
@@ -25,7 +25,7 @@ int main(){
         .thread = 0
     };
 
-    vmExecProgram(&exec, &vm, NULL);
+    vmExecProgram(&exec, 1, &vm, NULL);
     printf("Server answered\n");
 
 

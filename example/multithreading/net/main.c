@@ -10,14 +10,14 @@ int main(){
 
     // code0
    /*
-        rip: assembly  ; bytecode
-        0  : answer    ; 0x00000021
+        pc: assembly  ; bytecode
+        0 : answer    ; 0x00000021
    */
 
     // code1
     /*
-        rip: assembly                     ; bytecode
-        0  : ask {127.0.0.1 / 60000 / 0}  ; 0x00000020 0x7f000001ea60
+        pc: assembly                     ; bytecode
+        0 : ask {127.0.0.1 / 60000 / 0}  ; 0x00000020 0x7f000001ea60
     */
  
     vm_uint8_t code0[4] = {
@@ -45,7 +45,7 @@ int main(){
         }
     };
 
-    vmExecProgramMT(prog, 2, &vm, NULL);
+    vmExecProgram(prog, 2, &vm, NULL);
 
     if(vm.halt)
         printf("Wrong instruction! VMInstance %p halted\n", &vm);
